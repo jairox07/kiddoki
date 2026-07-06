@@ -2,6 +2,7 @@
 // Six game engines, config-driven. Each reports {correct, total} to onFinish.
 // Feedback is always positive-framed (growth mindset): errors teach, never punish.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { play } from '@/lib/juice';
 
 export type GameResult = { correct: number; total: number };
 type GameProps = { config: Record<string, unknown>; onFinish: (r: GameResult) => void };
@@ -13,12 +14,28 @@ const nudge = () => NUDGES[Math.floor(Math.random() * NUDGES.length)];
 const shuffle = <T,>(arr: T[]) => [...arr].sort(() => Math.random() - 0.5);
 const rand = (n: number) => Math.floor(Math.random() * n);
 
+// Every correct answer pays visibly: sound + flying gem, not just the final screen.
 function Feedback({ kind, text }: { kind: 'good' | 'retry'; text: string }) {
+  useEffect(() => { play(kind === 'good' ? 'correct' : 'retry'); }, [kind]);
   return (
-    <p role="status" className={`pop rounded-blob px-6 py-3 text-center text-xl font-700 ${
-      kind === 'good' ? 'bg-pine-soft text-pine-deep' : 'bg-sun-soft text-ink'}`}>
-      {text}
-    </p>
+    <div className="relative">
+      {kind === 'good' && <span aria-hidden className="gem-fly absolute left-1/2 top-0 text-3xl">💎</span>}
+      <p role="status" className={`pop rounded-blob px-6 py-3 text-center text-xl font-700 ${
+        kind === 'good' ? 'bg-pine-soft text-pine-deep' : 'bg-sun-soft text-ink'}`}>
+        {text}
+      </p>
+    </div>
+  );
+}
+
+export function RoundDots({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="flex justify-center gap-2" aria-label={`ronda ${current + 1} de ${total}`}>
+      {Array.from({ length: total }).map((_, i) => (
+        <span key={i} className={`h-3 rounded-full transition-all duration-300 ease-out-quint ${
+          i < current ? 'w-3 bg-pine' : i === current ? 'w-7 bg-coral' : 'w-3 bg-paper'}`} />
+      ))}
+    </div>
   );
 }
 
@@ -80,7 +97,7 @@ export function CountTap({ config, onFinish }: GameProps) {
         ))}
       </div>
       {fb ? <Feedback {...fb} /> : <Options choices={choices} onPick={pick} disabled={false} />}
-      <p className="text-sm text-mist">Ronda {round + 1} de {rounds}</p>
+      <RoundDots current={round} total={rounds} />
     </div>
   );
 }
@@ -102,6 +119,7 @@ export function MemoryPairs({ config, onFinish }: GameProps) {
       attempts.current += 1;
       const [a, b] = next;
       if (deck[a] === deck[b]) {
+        play('correct');
         const nf = new Set(found).add(a).add(b);
         setTimeout(() => {
           setFound(nf); setOpen([]);
@@ -110,6 +128,7 @@ export function MemoryPairs({ config, onFinish }: GameProps) {
           }
         }, 500);
       } else {
+        play('retry');
         setTimeout(() => setOpen([]), 900);
       }
     }
@@ -179,7 +198,7 @@ export function Pattern({ config, onFinish }: GameProps) {
         <span className="flex h-16 w-16 items-center justify-center rounded-2xl border-4 border-dashed border-mist text-3xl text-mist">?</span>
       </div>
       {fb ? <Feedback {...fb} /> : <Options choices={puzzle.opts} onPick={pick} disabled={false} />}
-      <p className="text-sm text-mist">Ronda {round + 1} de {rounds}</p>
+      <RoundDots current={round} total={rounds} />
     </div>
   );
 }
@@ -196,6 +215,7 @@ export function MathBlocks({ config, onFinish }: GameProps) {
   const prob = useMemo(() => {
     let a: number, b: number, ans: number, sym: string;
     if (op === 'mul') { a = 2 + rand(Math.min(9, max - 1)); b = 2 + rand(8); ans = a * b; sym = '×'; }
+    else if (op === 'div') { ans = 2 + rand(8); b = 2 + rand(Math.min(8, max - 1)); a = ans * b; sym = '÷'; }
     else if (op === 'sub') { a = 2 + rand(max - 1); b = 1 + rand(a - 1); ans = a - b; sym = '−'; }
     else { a = 1 + rand(max - 1); b = 1 + rand(Math.max(1, max - a)); ans = a + b; sym = '+'; }
     const opts = new Set([ans]);
@@ -229,7 +249,7 @@ export function MathBlocks({ config, onFinish }: GameProps) {
         </div>
       )}
       {fb ? <Feedback {...fb} /> : <Options choices={prob.opts} onPick={pick} disabled={false} />}
-      <p className="text-sm text-mist">Ronda {round + 1} de {rounds}</p>
+      <RoundDots current={round} total={rounds} />
     </div>
   );
 }
@@ -251,6 +271,7 @@ export function WordBuilder({ config, onFinish }: GameProps) {
   function tap(s: string, i: number) {
     if (used.has(i)) return;
     if (s === w.syllables[built.length]) {
+      play('correct');
       const nb = [...built, s];
       setBuilt(nb);
       setUsed(new Set(used).add(i));
@@ -265,6 +286,7 @@ export function WordBuilder({ config, onFinish }: GameProps) {
         }, 1300);
       }
     } else {
+      play('retry');
       setMistake(true);
       setErrors((e) => e + 1);
       setTimeout(() => setMistake(false), 700);
@@ -344,6 +366,101 @@ export function HeartScenarios({ config, onFinish }: GameProps) {
   );
 }
 
+// ============ 7. sort-classify: Piagetian categorization (colors, habitats, recycling) ============
+export function SortClassify({ config, onFinish }: GameProps) {
+  const prompt = (config.prompt as string) ?? '¿Dónde va?';
+  const groups = (config.groups as { label: string; emoji: string }[]) ?? [];
+  const items = useMemo(() => shuffle((config.items as { emoji: string; group: string }[]) ?? []), [config]);
+  const [idx, setIdx] = useState(0);
+  const [correct, setCorrect] = useState(0);
+  const [fb, setFb] = useState<{ kind: 'good' | 'retry'; text: string } | null>(null);
+  const item = items[idx];
+
+  if (!item) return null;
+
+  function pick(label: string) {
+    const ok = label === item.group;
+    if (ok) setCorrect((n) => n + 1);
+    setFb({ kind: ok ? 'good' : 'retry', text: ok ? cheer() : `Va en ${item.group}. ¡La siguiente la tienes!` });
+    setTimeout(() => {
+      setFb(null);
+      idx + 1 >= items.length ? onFinish({ correct: correct + (ok ? 1 : 0), total: items.length }) : setIdx(idx + 1);
+    }, 1100);
+  }
+
+  return (
+    <div className="space-y-8 text-center">
+      <p className="text-2xl font-700 text-ink">{prompt}</p>
+      <div className="pop text-8xl" key={idx} aria-hidden>{item.emoji}</div>
+      {fb ? <Feedback {...fb} /> : (
+        <div className="flex flex-wrap justify-center gap-4">
+          {groups.map((g) => (
+            <button key={g.label} onClick={() => pick(g.label)}
+              className="flex flex-col items-center gap-1 rounded-blob bg-paper px-8 py-5 transition-transform ease-out-quint hover:scale-105 active:scale-95">
+              <span className="text-4xl" aria-hidden>{g.emoji}</span>
+              <span className="text-lg font-700 text-ink">{g.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <RoundDots current={idx} total={items.length} />
+    </div>
+  );
+}
+
+// ============ 8. story-quiz: active reading comprehension (the YouTube substitute) ============
+export function StoryQuiz({ config, onFinish }: GameProps) {
+  const story = (config.story as string) ?? '';
+  const emoji = (config.emoji as string) ?? '📖';
+  const questions = (config.questions as { q: string; options: { text: string; good: boolean }[] }[]) ?? [];
+  const [stage, setStage] = useState<'read' | number>('read');
+  const [correct, setCorrect] = useState(0);
+  const [fb, setFb] = useState<{ kind: 'good' | 'retry'; text: string } | null>(null);
+  const qIdx = typeof stage === 'number' ? stage : -1;
+  const question = questions[qIdx];
+  const opts = useMemo(() => (question ? shuffle(question.options) : []), [qIdx, question]);
+
+  function pick(o: { text: string; good: boolean }) {
+    if (o.good) setCorrect((n) => n + 1);
+    setFb({ kind: o.good ? 'good' : 'retry', text: o.good ? cheer() : 'Vuelve a pensar en el cuento...' });
+    setTimeout(() => {
+      setFb(null);
+      qIdx + 1 >= questions.length ? onFinish({ correct: correct + (o.good ? 1 : 0), total: questions.length }) : setStage(qIdx + 1);
+    }, 1300);
+  }
+
+  if (stage === 'read') return (
+    <div className="space-y-8 text-center">
+      <div className="float-slow text-8xl" aria-hidden>{emoji}</div>
+      <p className="mx-auto max-w-[48ch] rounded-blob bg-paper p-8 text-left text-xl font-500 leading-relaxed text-ink">
+        {story}
+      </p>
+      <button onClick={() => setStage(0)}
+        className="rounded-full bg-pine-deep px-8 py-3.5 text-xl font-700 text-paper transition-transform ease-out-quint hover:scale-105">
+        ¡Ya lo leí! →
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-8 text-center">
+      <div className="text-6xl" aria-hidden>{emoji}</div>
+      <p className="text-2xl font-700 leading-snug text-ink">{question.q}</p>
+      {fb ? <Feedback {...fb} /> : (
+        <div className="mx-auto flex max-w-md flex-col gap-3">
+          {opts.map((o) => (
+            <button key={o.text} onClick={() => pick(o)}
+              className="rounded-blob bg-paper px-6 py-4 text-left text-xl font-700 text-ink transition-transform ease-out-quint hover:scale-[1.02] active:scale-95">
+              {o.text}
+            </button>
+          ))}
+        </div>
+      )}
+      <RoundDots current={qIdx} total={questions.length} />
+    </div>
+  );
+}
+
 export const GAME_ENGINES: Record<string, (p: GameProps) => ReactNode> = {
   'count-tap': (p) => <CountTap {...p} />,
   'memory-pairs': (p) => <MemoryPairs {...p} />,
@@ -351,4 +468,6 @@ export const GAME_ENGINES: Record<string, (p: GameProps) => ReactNode> = {
   'math-blocks': (p) => <MathBlocks {...p} />,
   'word-builder': (p) => <WordBuilder {...p} />,
   'heart-scenarios': (p) => <HeartScenarios {...p} />,
+  'sort-classify': (p) => <SortClassify {...p} />,
+  'story-quiz': (p) => <StoryQuiz {...p} />,
 };

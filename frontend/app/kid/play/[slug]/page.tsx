@@ -6,9 +6,10 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { GAME_ENGINES, type GameResult } from '@/components/games';
+import { play, soundEnabled, toggleSound } from '@/lib/juice';
 
 type Mission = { slug: string; title: string; game_type: string; gems_reward: number; config: Record<string, unknown>; path_name: string; path_emoji: string };
-type Reward = { gems: number; stars: number; level: number; gemsEarned: number; streak: number };
+type Reward = { gems: number; stars: number; level: number; gemsEarned: number; streak: number; dailyChest: boolean; chestBonus: number };
 
 const CONFETTI_COLORS = ['oklch(66% 0.17 38)', 'oklch(84% 0.14 92)', 'oklch(70% 0.1 235)', 'oklch(42% 0.09 158)'];
 
@@ -17,6 +18,8 @@ export default function PlayPage({ params }: { params: Promise<{ slug: string }>
   const childId = useSearchParams().get('child');
   const [mission, setMission] = useState<Mission | null>(null);
   const [result, setResult] = useState<(GameResult & Reward) | null>(null);
+  const [sound, setSound] = useState(true);
+  useEffect(() => setSound(soundEnabled()), []);
 
   useEffect(() => {
     api<Mission>(`/missions/${slug}`).then(setMission).catch(() => { window.location.href = '/kid'; });
@@ -28,6 +31,7 @@ export default function PlayPage({ params }: { params: Promise<{ slug: string }>
       method: 'POST',
       body: JSON.stringify({ accuracy }),
     });
+    play(reward.dailyChest ? 'chest' : 'win');
     setResult({ ...r, ...reward });
   }
 
@@ -43,7 +47,13 @@ export default function PlayPage({ params }: { params: Promise<{ slug: string }>
     <main className="min-h-screen bg-cream pb-16 font-kid">
       <nav className="mx-auto flex max-w-2xl items-center justify-between px-6 py-5">
         <Link href="/kid" className="rounded-full bg-paper px-5 py-2 text-lg font-700 text-ink">← Sendero</Link>
-        <span className="text-sm font-700 text-mist">{mission.path_emoji} {mission.path_name}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-700 text-mist">{mission.path_emoji} {mission.path_name}</span>
+          <button onClick={() => setSound(toggleSound())} aria-label={sound ? 'silenciar' : 'activar sonido'}
+            className="rounded-full bg-paper px-3 py-2 text-lg">
+            {sound ? '🔊' : '🔇'}
+          </button>
+        </div>
       </nav>
 
       <div className="mx-auto max-w-2xl px-6">
@@ -69,6 +79,12 @@ export default function PlayPage({ params }: { params: Promise<{ slug: string }>
               <p className="mt-4 inline-block rounded-full bg-sun px-6 py-2 text-2xl font-700 text-ink">
                 +{result.gemsEarned} 💎
               </p>
+              {result.dailyChest && (
+                <div className="mt-4 rounded-blob bg-sun-soft px-6 py-4">
+                  <span className="chest-shake inline-block text-4xl" aria-hidden>🎁</span>
+                  <p className="mt-1 text-lg font-700 text-ink">¡Cofre del día! +{result.chestBonus} 💎 extra por venir a jugar</p>
+                </div>
+              )}
               {result.streak > 1 && <p className="mt-3 text-lg font-700 text-coral">🔥 Racha de {result.streak} días</p>}
               <div className="mt-8 flex justify-center gap-4">
                 <button onClick={() => setResult(null)} className="rounded-full bg-cream px-6 py-3 text-lg font-700 text-ink">

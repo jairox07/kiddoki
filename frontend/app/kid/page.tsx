@@ -8,6 +8,7 @@ import { api, avatarEmoji } from '@/lib/api';
 type Child = { id: string; alias: string; avatar_seed: string; age_band: string; guide_character: string; gems: number; stars: number; level: number; guide_stage: number };
 type Mission = { id: string; slug: string; title: string; game_type: string; difficulty: number; gems_reward: number; done_today: boolean; best_accuracy: number | null };
 type World = { id: string; slug: string; name: string; emoji: string; tagline: string; missions: Mission[] };
+type Badge = { id: string; emoji: string; name: string; earned: boolean; progress: number; goal: number };
 
 const GUIDES: Record<string, string[]> = {
   koki: ['🥚', '🐣', '🐤', '🦜'],
@@ -21,6 +22,7 @@ const WORLD_BG: Record<string, string> = {
 export default function KidHome() {
   const [child, setChild] = useState<Child | null>(null);
   const [worlds, setWorlds] = useState<World[]>([]);
+  const [badges, setBadges] = useState<Badge[]>([]);
   const [streak, setStreak] = useState(0);
   const [blocked, setBlocked] = useState(false);
 
@@ -29,12 +31,14 @@ export default function KidHome() {
       if (!kids.length) return;
       const kid = kids[0];
       setChild(kid);
-      const [paths, progress] = await Promise.all([
+      const [paths, progress, badgeList] = await Promise.all([
         api<World[]>(`/children/${kid.id}/paths`),
         api<{ streak: number }>(`/children/${kid.id}/progress`),
+        api<Badge[]>(`/children/${kid.id}/badges`),
       ]);
       setWorlds(paths);
       setStreak(progress.streak);
+      setBadges(badgeList);
       try {
         await api(`/children/${kid.id}/session/start`, { method: 'POST' });
       } catch (e) {
@@ -98,7 +102,24 @@ export default function KidHome() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-2xl space-y-10 px-6 pt-10">
+      {/* Badge shelf: earned shine, next-up shows progress toward goal */}
+      <section className="mx-auto max-w-2xl px-6 pt-8">
+        <div className="flex gap-3 overflow-x-auto pb-2">
+          {badges.filter((b) => b.earned).map((b) => (
+            <span key={b.id} className="pop flex shrink-0 items-center gap-2 rounded-full bg-sun px-4 py-2 text-sm font-700 text-ink">
+              {b.emoji} {b.name}
+            </span>
+          ))}
+          {badges.filter((b, i, all) => !b.earned && b.progress > 0
+            && all.findIndex((x) => !x.earned && x.progress > 0 && x.emoji === b.emoji) === i).slice(0, 3).map((b) => (
+            <span key={b.id} className="flex shrink-0 items-center gap-2 rounded-full bg-paper px-4 py-2 text-sm font-700 text-mist">
+              {b.emoji} {b.name} · {b.progress}/{b.goal}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <div className="mx-auto max-w-2xl space-y-10 px-6 pt-6">
         {worlds.map((w) => (
           <section key={w.id}>
             <div className="flex items-baseline gap-3">

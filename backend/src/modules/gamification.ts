@@ -7,14 +7,25 @@ import { q, redis } from '../db/index.js';
 const GEMS_PER_LEVEL = 100;
 const LEVELS_PER_GUIDE_STAGE = 5;
 
+const DAILY_CHEST_BONUS = 5;
+
 export async function awardMission(childId: string, missionSlug: string, accuracy: number) {
   const { rows: [mission] } = await q<{ id: string; gems_reward: number; stars_reward: number }>(
     'SELECT id, gems_reward, stars_reward FROM missions WHERE slug = $1', [missionSlug],
   );
   if (!mission) throw Object.assign(new Error('mission_not_found'), { statusCode: 404 });
 
+  // Daily chest: first mission of the day earns a bonus (retention hook, no dark pattern:
+  // it rewards showing up, never punishes absence).
+  const { rowCount: playedToday } = await q(
+    `SELECT 1 FROM mission_completions WHERE child_id = $1 AND completed_at > date_trunc('day', now()) LIMIT 1`,
+    [childId],
+  );
+  const dailyChest = !playedToday;
+
   // Effort always pays (growth mindset): full gems from 70% accuracy, floor of half below.
-  const gems = accuracy >= 70 ? mission.gems_reward : Math.max(1, Math.round(mission.gems_reward / 2));
+  const gems = (accuracy >= 70 ? mission.gems_reward : Math.max(1, Math.round(mission.gems_reward / 2)))
+    + (dailyChest ? DAILY_CHEST_BONUS : 0);
 
   await q('INSERT INTO mission_completions (child_id, mission_id, gems_earned, accuracy) VALUES ($1, $2, $3, $4)',
     [childId, mission.id, gems, accuracy]);
@@ -43,7 +54,42 @@ export async function awardMission(childId: string, missionSlug: string, accurac
     await redis.expire(streakKey, 60 * 60 * 48);
   }
 
-  return { ...progress, gemsEarned: gems };
+  return { ...progress, gemsEarned: gems, dailyChest, chestBonus: dailyChest ? DAILY_CHEST_BONUS : 0 };
+}
+
+// Badges computed from existing data: no new tables, thresholds are the spec.
+const WORLD_BADGES = [
+  { world: 'numeros', emoji: '🔢', name: 'Matemago' },
+  { world: 'palabras', emoji: '📚', name: 'Cuentacuentos' },
+  { world: 'logica', emoji: '🧩', name: 'Gran Detective' },
+  { world: 'corazon', emoji: '💛', name: 'Corazón Valiente' },
+];
+const LEVELS = [{ n: 3, tier: 'bronce' }, { n: 10, tier: 'plata' }, { n: 25, tier: 'oro' }] as const;
+
+export async function computeBadges(childId: string) {
+  const { rows: byWorld } = await q<{ slug: string; total: string }>(
+    `SELECT p.slug, COUNT(*) AS total
+     FROM mission_completions mc
+     JOIN missions m ON m.id = mc.mission_id
+     JOIN paths p ON p.id = m.path_id
+     WHERE mc.child_id = $1 GROUP BY p.slug`, [childId],
+  );
+  const { rows: [perfects] } = await q<{ total: string }>(
+    `SELECT COUNT(*) AS total FROM mission_completions WHERE child_id = $1 AND accuracy = 100`, [childId],
+  );
+  const streak = Number(await redis.hget(`streak:${childId}`, 'count') ?? 0);
+
+  const badges: { id: string; emoji: string; name: string; earned: boolean; progress: number; goal: number }[] = [];
+  for (const wb of WORLD_BADGES) {
+    const total = Number(byWorld.find((w) => w.slug === wb.world)?.total ?? 0);
+    for (const lv of LEVELS) {
+      badges.push({ id: `${wb.world}-${lv.tier}`, emoji: wb.emoji, name: `${wb.name} de ${lv.tier}`, earned: total >= lv.n, progress: Math.min(total, lv.n), goal: lv.n });
+    }
+  }
+  badges.push({ id: 'racha-3', emoji: '🔥', name: 'Racha de 3 días', earned: streak >= 3, progress: Math.min(streak, 3), goal: 3 });
+  badges.push({ id: 'racha-7', emoji: '🌋', name: 'Racha de 7 días', earned: streak >= 7, progress: Math.min(streak, 7), goal: 7 });
+  badges.push({ id: 'perfecto-5', emoji: '🎯', name: '5 rondas perfectas', earned: Number(perfects.total) >= 5, progress: Math.min(Number(perfects.total), 5), goal: 5 });
+  return badges;
 }
 
 export default async function gamificationRoutes(app: FastifyInstance) {
@@ -87,6 +133,11 @@ export default async function gamificationRoutes(app: FastifyInstance) {
       const streak = await redis.hget(`streak:${childId}`, 'count');
       return { ...progress, streak: Number(streak ?? 1) };
     });
+
+  app.get('/children/:childId/badges', guard, async (req) => {
+    const { childId } = req.params as { childId: string };
+    return computeBadges(childId);
+  });
 
   app.get('/children/:childId/progress', guard, async (req) => {
     const { childId } = req.params as { childId: string };
