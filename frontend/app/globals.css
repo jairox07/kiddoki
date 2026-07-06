@@ -2,11 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer components {
-  .kid-card {
-    @apply rounded-blob bg-white p-6 shadow-lg shadow-sky/20 border-4 border-transparent transition-transform hover:scale-105;
+@layer base {
+  body {
+    @apply bg-paper text-ink font-body antialiased;
   }
-  .parent-card {
-    @apply rounded-2xl bg-white p-5 shadow-sm border border-slate-200;
+  ::selection {
+    background: oklch(84% 0.14 92);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.rise-2 { animation-delay: 0.12s; }
+.rise-3 { animation-delay: 0.24s; }
+
+@keyframes pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop {
+  animation: pop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0.9; }
+}
+.confetti {
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  animation: confetti-fall 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.float-slow {
+  animation: float-slow 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .pop, .confetti, .float-slow {
+    animation: none;
   }
 }
